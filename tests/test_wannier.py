@@ -37,6 +37,15 @@ W90_LM = {"s": (0, 1), "pz": (1, 1), "px": (1, 2), "py": (1, 3)}
 
 
 # ==================================================
+@pytest.fixture(autouse=True)
+def restore_cwd(monkeypatch):
+    """
+    Restore the working directory after each test (MaterialModel and ModelAnalyzer may change it).
+    """
+    monkeypatch.chdir(os.getcwd())
+
+
+# ==================================================
 def wannier_info(A, cart):
     """
     Wannier info. for create_ket_wannier_multipie (one s projection per atom).
@@ -192,9 +201,13 @@ def centred_model(tmp_path_factory):
         "pdf": {"create": False},
         "qtdraw": {"create": False},
     }
-    create_model(model, topdir=topdir)
-    mm = MaterialModel(topdir=topdir)
-    mm.load(name)
+    cwd = os.getcwd()
+    try:
+        create_model(model, topdir=topdir)
+        mm = MaterialModel(topdir=topdir)
+        mm.load(name)
+    finally:
+        os.chdir(cwd)
     Zr = mm.get_samb_matrix({})["matrix"]
     rng = np.random.default_rng(1)
     parameter = {z: float(rng.normal()) for z in Zr}
@@ -443,3 +456,17 @@ def test_symcw_read_ks_not_implemented(centred_model):
             ModelAnalyzer(topdir).analyze(control)
     finally:
         os.chdir(cwd)
+
+
+# ==================================================
+def test_point_group_model(tmp_path):
+    # the model of a point group has no centring.
+    topdir = str(tmp_path)
+    model = {"model": "mol", "group": "D3h", "site": {"A": ("[1,0,0]", "s")}, "bond": [("A", "A", [1])]}
+    create_model(model | {"pdf": {"create": False}, "qtdraw": {"create": False}}, topdir=topdir)
+    mm = MaterialModel(topdir=topdir)
+    mm.load("mol")
+    assert np.allclose(model_primitive_vector(mm), mm["unit_vector"])
+    ma = ModelAnalyzer(topdir)
+    ma.analyze({"samb": {"model": "mol", "parameter": {"z1": 1.0}}})
+    assert np.allclose(ma["info"]["A"], mm["unit_vector"])
